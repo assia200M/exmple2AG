@@ -1,0 +1,13 @@
+Fichier,POI,Capteurs,Faisable,Capteurs_utilisés,POI_Couverts,Temps_ms,Generations
+config1.json,4,3,Oui,1,4,0,1
+config2.json,5,4,Oui,2,5,0,1
+config4.json,9,6,Oui,2,9,0,1
+config3.json,5,4,Oui,2,5,0,1
+config1.json,4,3,Oui,1,4,0,1
+config2.json,5,4,Oui,1,5,0,1
+config4.json,9,6,Oui,3,9,0,1
+config3.json,5,4,Oui,2,5,0,1
+config1.json,4,3,Oui,1,4,0,1
+config2.json,5,4,Oui,2,5,0,1
+config4.json,9,6,Oui,2,9,0,1
+config3.json,5,4,Oui,2,5,0,1
