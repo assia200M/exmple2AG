@@ -1,0 +1,34 @@
+{
+  "capteurs": [
+    { "id": 1, "rayon": 3.5 },
+    { "id": 2, "rayon": 5.0 },
+    { "id": 3, "rayon": 2.0 },
+    { "id": 4, "rayon": 4.5 }
+  ],
+  "points_interet": [
+    { "id": 1, "x": 2, "y": 1 },
+    { "id": 2, "x": 5, "y": 3 },
+    { "id": 3, "x": 8, "y": 4 },
+    { "id": 4, "x": 1, "y": 6 },
+    { "id": 5, "x": 7, "y": 2 }
+  ],
+  "emplacements": [
+    { "id": 1, "x": 2, "y": 2 },
+    { "id": 2, "x": 4, "y": 4 },
+    { "id": 3, "x": 6, "y": 1 },
+    { "id": 4, "x": 3, "y": 5 },
+    { "id": 5, "x": 5, "y": 6 },
+    { "id": 6, "x": 7, "y": 3 }
+  ],
+  "genetic_params": {
+    "population_size": 50,
+    "generations": 3,
+    "mutation_rate": 0.05,
+    "crossover_rate": 0.8,
+    "selection_method": "tournament",
+    "tournament_size": 3,
+    "stopping_criterion": "max_generations",
+    "chromosome_encoding": "reel"
+  }
+}
+
