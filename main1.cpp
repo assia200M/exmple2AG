@@ -1,179 +1,612 @@
-#include <filesystem>         // Pour parcourir les fichiers dans un dossier
-#include <chrono>             // Pour mesurer le temps d'exécution
-#include <fstream>            // Pour lire/écrire des fichiers
-#include <iostream>           // Pour afficher des messages à la console
-#include <vector>             // Pour les vecteurs dynamiques
-#include <random>             // Pour générer des valeurs aléatoires
-#include <ctime>              // Pour utiliser l'heure comme graine (seed)
-#include <nlohmann/json.hpp>  // Pour parser les fichiers JSON
-#include <set>                // Pour des ensembles de valeurs uniques
-#include <iomanip>            // Pour la mise en forme des sorties
-#include <numeric>            // Pour accumulate, etc.
-#include <cmath>              // Pour les fonctions mathématiques
-
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <fstream>
+#include <set>
+#include <random>
+#include "json.hpp"
 
 using namespace std;
 using json = nlohmann::json;
 
-using Chromosome = vector<int>;
-using Population = vector<Chromosome>;
+// Structures
+struct Position {
+    double x;
+    double y;
+};
 
+struct PointInteret {
+    int id;
+    Position pos;
+};
+
+struct Capteur {
+    int id;
+    double rayon;
+};
+
+// Variables globales
+int TAILLE_POPULATION;
+int N_GENERATIONS;
+double MUTATION_RATE;
+double CROSSOVER_RATE;
+int TOURNAMENT_SIZE;
 int N_CAPTEURS = 0;
 int N_EMPLACEMENTS = 0;
-int TAILLE_POPULATION = 0;
-int TAILLE_CHROMOSOME = N_CAPTEURS * N_EMPLACEMENTS;
-int MAX_GENERATIONS = 3;
+int chromosome_size = 0;
 
-vector<pair<double, double>> emplacements;         // Coordonnées des emplacements possibles
-vector<pair<double, double>> points_interet;       // Coordonnées des POI à couvrir
-vector<vector<double>> matrice_distance;           // Distances entre emplacements et POI
-vector<double> rayons_capteurs;                    // Rayon de chaque capteur
+vector<Capteur> capteurs;
+vector<PointInteret> points_interet;
+vector<Position> emplacements;
+vector<vector<double>> matrice_distance;
 
-
-// Lecture des données JSON
-void lireDonneesDepuisJSON(const string& nomFichier) {
-    ifstream fichier(nomFichier);
-    if (!fichier) {
-        cerr << "Erreur ouverture du fichier JSON.\n";// Affiche une erreur si le fichier est introuvable
-        exit(1);
+// Types
+typedef vector<int> Chromosome;
+typedef vector<Chromosome> Population;
+void reparer(Chromosome& chromo);
+// Logger
+void log(string texte) {
+    ofstream fichier("log.txt", ios::app);
+    if (fichier.is_open()) {
+        fichier << texte << endl;
+        fichier.close();
     }
-    json data;
-    fichier >> data;// Parse le contenu du JSON
- // Lecture des paramètres
-    N_CAPTEURS = data["capteurs"].size();
-    N_EMPLACEMENTS = data["emplacements"].size();
-    TAILLE_POPULATION = data["genetic_params"]["population_size"];
-    MAX_GENERATIONS = data["genetic_params"]["generations"];
-    TAILLE_CHROMOSOME = N_CAPTEURS;
-
-    emplacements.clear();
-    points_interet.clear();
-    rayons_capteurs.clear();
-    // Chargement des positions et rayon
-    for (const auto& e : data["emplacements"])
-        emplacements.emplace_back(e["x"], e["y"]);
-
-    for (const auto& p : data["points_interet"])
-        points_interet.emplace_back(p["x"], p["y"]);
-
-    for (const auto& capteur : data["capteurs"])
-        rayons_capteurs.push_back(capteur["rayon"]);
 }
 
-// Calcul de la distance euclidienne
-double calculerDistance(const pair<double, double>& a, const pair<double, double>& b) {
-    return sqrt(pow(a.first - b.first, 2) + pow(a.second - b.second, 2));
+// Fonctions
+double calculerDistance(Position p1, Position p2) {
+    return sqrt(pow(p1.x - p2.x, 2) + pow(p1.y - p2.y, 2));
 }
 
-// Calcul de la matrice de distances
 void calculerMatriceDistance() {
-    matrice_distance.resize(N_EMPLACEMENTS, vector<double>(points_interet.size()));
-    for (int i = 0; i < N_EMPLACEMENTS; ++i)
-        for (int j = 0; j < points_interet.size(); ++j)
-            matrice_distance[i][j] = calculerDistance(emplacements[i], points_interet[j]);
-}
-//Cette fonction vérifie si tous les points d’intérêt ont bien été couverts par les capteurs dans une solution donnée (chromosome).
-//C’est une condition essentielle pour qu’une solution soit considérée comme "valide".
-// Vérifie si la solution couvre tous les POI
-bool estCouvertureComplete(const Chromosome& ind) {
-    vector<bool> couverts(points_interet.size(), false);//On crée une liste de "vrai/faux" pour chaque point d'intérêt (POI), tous initialisés à false, car au départ, aucun point n'est encore couvert.
-    for (int i = 0; i < N_CAPTEURS; ++i) {
-        if (ind[i] == 0) continue;//Si ce capteur n’est pas utilisé dans cette solution (valeur 0), on le saute.
-        int e = ind[i] - i * N_EMPLACEMENTS - 1;//calcule lemplacement de capteur utiliser et il retounre l'indice  de l’emplacement
-        if (e < 0 || e >= matrice_distance.size()) continue;
-        double rayon = rayons_capteurs[i];//On récupère le rayon de couverture du capteur
-        for (int j = 0; j < points_interet.size(); ++j)
-            if (!couverts[j] && matrice_distance[e][j] <= rayon)//Si ce point n'est pas encore couvert et qu’il est dans le rayon du capteur → alors on le marque comme couvert.
-                couverts[j] = true;
+    matrice_distance.resize(emplacements.size(), vector<double>(points_interet.size()));
+    for (size_t i = 0; i < emplacements.size(); ++i) {
+        for (size_t j = 0; j < points_interet.size(); ++j) {
+            matrice_distance[i][j] = calculerDistance(emplacements[i], points_interet[j].pos);
+        }
     }
-    return all_of(couverts.begin(), couverts.end(), [](bool b) { return b; });//vérifie si tous les points sont couverts.  si oui rentur yes sinon f
-}
-//Cette fonction récompense les solutions qui : Couvre tous les points d’intérêt Utilisent le moins de capteurs possible 
-// Fonction d'évaluation
-double fonctionFitness(const Chromosome& ind) {//Elle retourne une valeur double qui représente la performance de ce chromosome
-    if (!estCouvertureComplete(ind)) return 0.0;//Si la solution ne couvre pas tous les points d’intérêt, on retourne immédiatement 0.0.
-//Ça évite de favoriser des solutions incomplètes — c’est un filtre pour ne garder que les solutions valides.
 
-    int capteurs_utiles = 0;// On initialise un compteur pour savoir combien de capteurs ont été réellement utilisés dans cette solution.
-   // On compte les capteurs activés (valeurs ≠ 0) pour savoir combien sont utilisés dans la solution, afin de pouvoir ensuite appliquer une pénalité si leur nombre est élevé
-    for (int i = 0; i < N_CAPTEURS; ++i)
-        if (ind[i] != 0) capteurs_utiles++;
-
-    double penalite = 0.8 * capteurs_utiles;//On diminue le score (fitness) en fonction du nombre de capteurs utilisés — plus on utilise de capteurs, plus on est pénalisé.
-   //Le nombre total de points d’intérêt (objectif à maximiser) moins la pénalité (objectif à minimiser)  || Cela équilibre la couverture avec l’économie de ressources (capteurs).
-
-
-    return static_cast<double>(points_interet.size()) - penalite;
+    log("Matrice de distance calculée :");
+    for (size_t i = 0; i < emplacements.size(); ++i) {
+        string ligne = "Emplacement " + to_string(i+1) + ": ";
+        for (size_t j = 0; j < points_interet.size(); ++j) {
+            ligne += to_string(matrice_distance[i][j]) + " ";
+        }
+        log(ligne);
+    }
 }
 
-// Initialisation de la population
-Population initialiserPopulation() {
-    Population population;
+void calculerEtAfficherMatriceCouvertureParCapteur() {
+    for (size_t capteur_idx = 0; capteur_idx < capteurs.size(); ++capteur_idx) {
+        double rayon = capteurs[capteur_idx].rayon;
+
+        vector<vector<int>> matrice_couverture(emplacements.size(), vector<int>(points_interet.size(), 0));
+
+        for (size_t i = 0; i < emplacements.size(); ++i) {
+            for (size_t j = 0; j < points_interet.size(); ++j) {
+                if (matrice_distance[i][j] <= rayon) {
+                    matrice_couverture[i][j] = 1;
+                }
+            }
+        }
+
+        // Afficher cette matrice
+        log("=== Matrice de couverture du Capteur " + to_string(capteurs[capteur_idx].id) + " (rayon = " + to_string(rayon) + ") ===");
+        for (size_t i = 0; i < emplacements.size(); ++i) {
+            string ligne = "Emp " + to_string(i+1) + ": ";
+            for (size_t j = 0; j < points_interet.size(); ++j) {
+                ligne += to_string(matrice_couverture[i][j]) + " ";
+            }
+            log(ligne);
+        }
+        log("===============================================================");
+    }
+}
+
+vector<vector<int>> initialiser_population() {
+    vector<vector<int>> population;
     random_device rd;
     mt19937 gen(rd());
 
-    for (int i = 0; i < TAILLE_POPULATION; ++i) {
-        Chromosome individu;
-        for (int j = 0; j < N_CAPTEURS; ++j) {
-            uniform_real_distribution<> chance(0.0, 1.0);
-            if (chance(gen) < 0.3)
-                individu.push_back(0);
-            else {
-                int base = j * N_EMPLACEMENTS;
-                uniform_int_distribution<> distrib(base + 1, base + N_EMPLACEMENTS);
-                individu.push_back(distrib(gen));
-            }
+    int nb_emplacements_par_capteur = N_EMPLACEMENTS;
+    for (int i = 0; i < TAILLE_POPULATION; i++) {
+        vector<int> chromosome(chromosome_size, 0);
+
+        for (int capteur = 0; capteur < N_CAPTEURS; capteur++) {
+            int debut = capteur * nb_emplacements_par_capteur;
+            uniform_int_distribution<> dis(debut, debut + nb_emplacements_par_capteur - 1);
+            int position = dis(gen);
+            chromosome[position] = 1; // activer un seul bit par capteur
         }
-        population.push_back(individu);
+
+        population.push_back(chromosome);
     }
+
     return population;
 }
 
-// Sélection par tournoi
-Chromosome tournoiSelection(const Population& population, int k = 5) {
-    random_device rd;
-    mt19937 gen(rd());
-    uniform_int_distribution<> distrib(0, population.size() - 1);
-    Chromosome meilleur;
-    double meilleure_fitness = -1e9;
-    for (int i = 0; i < k; ++i) {
-        int idx = distrib(gen);
-        double f = fonctionFitness(population[idx]);
-        if (f > meilleure_fitness) {
-            meilleure_fitness = f;
-            meilleur = population[idx];
+double fonctionFitness(const Chromosome& individu);
+void afficher_population(const vector<vector<int>>& population) {
+    ofstream fichier("log.txt", ios::app); // ouvrir en mode ajout
+
+    log("Population initiale :");
+    for (int i = 0; i < population.size(); i++) {
+        string ligne = "Individu " + to_string(i + 1) + " : ";
+        bool first = true;
+        for (int j = 0; j < population[i].size(); j++) {
+            if (population[i][j] == 1) {
+                if (!first) ligne += ", ";
+                ligne += to_string(j + 1); // commencer à 1
+                first = false;
+            }
+        }
+
+        double fitness = fonctionFitness(population[i]);
+        ligne += " | Fitness = " + to_string(fitness);
+
+        cout << ligne << endl;         // afficher sur la console
+        if (fichier.is_open()) {
+            fichier << ligne << endl;  // écrire aussi dans log.txt
         }
     }
+
+    log("--------------------------------------------------");
+    fichier.close(); // fermer le fichier à la fin
+}
+
+
+
+
+
+bool estCouvertureComplete(const Chromosome& individu) {
+    set<int> couverts;
+
+    int nb_emplacements_par_capteur = N_EMPLACEMENTS;
+    for (int capteur = 0; capteur < N_CAPTEURS; capteur++) {
+        int debut = capteur * nb_emplacements_par_capteur;
+        int id_emplacement = -1;
+
+        for (int pos = debut; pos < debut + nb_emplacements_par_capteur; ++pos) {
+            if (individu[pos] == 1) {
+                id_emplacement = pos - debut; // Position locale (0..N-1)
+                break;
+            }
+        }
+
+        if (id_emplacement == -1) continue; // Aucun capteur placé
+
+        for (size_t j = 0; j < points_interet.size(); ++j) {
+            if (matrice_distance[id_emplacement][j] <= capteurs[capteur].rayon) {
+                couverts.insert(j);
+            }
+        }
+    }
+    return couverts.size() == points_interet.size();
+}/*
+bool estConnecte(const Chromosome& individu) {
+    vector<pair<Position, double>> capteurs_actifs; // (position, rayon)
+
+    int nb_emplacements_par_capteur = N_EMPLACEMENTS;
+
+    for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
+        double rayon = capteurs[capteur].rayon;
+        if (rayon == 0) continue; // ignorer capteur inutile
+
+        int debut = capteur * nb_emplacements_par_capteur;
+        for (int pos = debut; pos < debut + nb_emplacements_par_capteur; ++pos) {
+            if (individu[pos] == 1) {
+                capteurs_actifs.push_back({emplacements[pos - debut], rayon});
+                break;
+            }
+        }
+    }
+
+    if (capteurs_actifs.empty()) return false; // Aucun capteur actif
+
+    // Construire le graphe
+    int n = capteurs_actifs.size();
+    vector<vector<int>> graph(n);
+
+    for (int i = 0; i < n; ++i) {
+        Position p1 = capteurs_actifs[i].first;
+        double r1 = capteurs_actifs[i].second;
+        for (int j = i + 1; j < n; ++j) {
+            Position p2 = capteurs_actifs[j].first;
+            double r2 = capteurs_actifs[j].second;
+            double dist = calculerDistance(p1, p2);
+            if (dist <= r1 + r2) {
+                graph[i].push_back(j);
+                graph[j].push_back(i);
+            }
+        }
+    }
+
+    // Parcours DFS pour vérifier la connectivité
+    vector<bool> visité(n, false);
+    vector<int> stack;
+    stack.push_back(0);
+    visité[0] = true;
+
+    while (!stack.empty()) {
+        int u = stack.back();
+        stack.pop_back();
+        for (int v : graph[u]) {
+            if (!visité[v]) {
+                visité[v] = true;
+                stack.push_back(v);
+            }
+        }
+    }
+
+    // Tous les capteurs doivent être visités
+    for (bool v : visité) {
+        if (!v) return false;
+    }
+
+    return true;
+}
+*/
+double fonctionFitness(const Chromosome& individu) {
+    if (!estCouvertureComplete(individu)) return 0.0;
+
+    // Connexité désactivée ici
+
+    vector<bool> couverts(points_interet.size(), false);
+    int capteurs_utiles = 0;
+
+    int nb_emplacements_par_capteur = N_EMPLACEMENTS;
+
+    for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
+        double rayon = capteurs[capteur].rayon;
+        if (rayon == 0) continue;
+
+        int debut = capteur * nb_emplacements_par_capteur;
+        int id_emplacement = -1;
+
+        for (int pos = debut; pos < debut + nb_emplacements_par_capteur; ++pos) {
+            if (individu[pos] == 1) {
+                id_emplacement = pos - debut;
+                break;
+            }
+        }
+
+        if (id_emplacement == -1) continue;
+
+        bool a_couvert = false;
+        for (size_t j = 0; j < points_interet.size(); ++j) {
+            if (!couverts[j] && matrice_distance[id_emplacement][j] <= rayon) {
+                couverts[j] = true;
+                a_couvert = true;
+            }
+        }
+
+        if (a_couvert) capteurs_utiles++;
+    }
+
+    int nb_couverts = count(couverts.begin(), couverts.end(), true);
+    double penalite = 0.8 * capteurs_utiles;
+
+    return static_cast<double>(nb_couverts) - penalite;
+}
+
+
+void lireJSON(string nom_fichier) {
+    ifstream input(nom_fichier);
+    json j;
+    input >> j;
+
+    for (auto& c : j["capteurs"]) {
+        if (c["rayon"] > 0) {  // <<< ajoute cette condition
+            capteurs.push_back({c["id"], c["rayon"]});
+        } else {
+            log(" Capteur ID " + to_string(c["id"]) + " ignoré (rayon = 0).");
+        }
+    }
+
+    for (auto& p : j["points_interet"]) {
+        points_interet.push_back({p["id"], {p["x"], p["y"]}});
+    }
+
+    for (auto& e : j["emplacements"]) {
+        emplacements.push_back({e["x"], e["y"]});
+    }
+
+    TAILLE_POPULATION = j["genetic_params"]["population_size"];
+    N_GENERATIONS = j["genetic_params"]["generations"];
+    MUTATION_RATE = j["genetic_params"]["mutation_rate"];
+    CROSSOVER_RATE = j["genetic_params"]["crossover_rate"];
+    TOURNAMENT_SIZE = j["genetic_params"]["tournament_size"];
+
+    N_CAPTEURS = capteurs.size();
+    N_EMPLACEMENTS = emplacements.size();
+    chromosome_size = N_CAPTEURS * N_EMPLACEMENTS;
+}
+
+
+//
+Chromosome tournoi_selection(const Population& population) {
+    random_device rd;
+    mt19937 gen(rd());
+    uniform_int_distribution<> dis(0, population.size() - 1);
+
+    Chromosome meilleur;
+    int meilleur_index = -1;
+    double meilleure_fitness = -1.0;
+log("--------------------------------------------------");
+    log("Début de la sélection par tournoi:");
+    for (int i = 0; i < TOURNAMENT_SIZE; i++) {
+        int index = dis(gen);
+        const Chromosome& candidat = population[index];
+        double fitness = fonctionFitness(candidat);
+
+        string ligne = "Candidat " + to_string(i+1) + " (Individu " + to_string(index+1) + ") : fitness = " + to_string(fitness);
+        log(ligne);
+
+        if (fitness > meilleure_fitness) {
+            meilleur = candidat;
+            meilleure_fitness = fitness;
+            meilleur_index = index;
+        }
+    }
+    log("Fin de la sélection par tournoi.");
+    
+    if (meilleur_index != -1) {
+        log("Individu sélectionné : Individu " + to_string(meilleur_index + 1) + " avec fitness = " + to_string(meilleure_fitness));
+    } else {
+        log("Erreur : Aucun individu sélectionné !");
+    }
+
+    log("--------------------------------------------------");
+
     return meilleur;
 }
 
-// Croisement à un point
-pair<Chromosome, Chromosome> croisement(const Chromosome& p1, const Chromosome& p2) {
-    int taille = p1.size();
-    random_device rd;
-    mt19937 gen(rd());
-    uniform_int_distribution<> dist(1, taille - 2);
-    int point = dist(gen);
-    Chromosome e1 = p1, e2 = p2;
-    for (int i = point; i < taille; ++i)
-        swap(e1[i], e2[i]);
-    return {e1, e2};
-}
 
-// Mutation
-void mutation(Chromosome& ind, double taux = 0.1) {
+tuple<Chromosome, Chromosome, int> croisement(const Chromosome& parent1, const Chromosome& parent2) {
     random_device rd;
     mt19937 gen(rd());
-    uniform_real_distribution<> p(0.0, 1.0);
-    for (int i = 0; i < ind.size(); ++i) {
-        if (p(gen) < taux) {
-            int base = i * N_EMPLACEMENTS;
-            uniform_int_distribution<> d(base + 1, base + N_EMPLACEMENTS);
-            ind[i] = d(gen);
-        }
+    uniform_int_distribution<> dis(0, chromosome_size - 1);
+
+    int point = dis(gen);
+
+    Chromosome enfant1 = parent1;
+    Chromosome enfant2 = parent2;
+
+    for (int i = point; i < chromosome_size; i++) {
+        swap(enfant1[i], enfant2[i]);
+        
+    }
+reparer(enfant1); // <-- ajout !
+reparer(enfant2); // <-- ajout !
+
+    // Construire le texte à logger et afficher
+    stringstream ss;
+    ss << "\n=== Croisement effectué ===\n";
+    ss << "Point de croisement : " << point << "\n";
+
+    ss << "Parent 1 : ";
+    for (int gene : parent1) ss << gene << " ";
+    ss << "\n";
+
+    ss << "Parent 2 : ";
+    for (int gene : parent2) ss << gene << " ";
+    ss << "\n";
+
+    ss << "Enfant 1 : ";
+    for (int gene : enfant1) ss << gene << " ";
+    ss << "\n";
+
+    ss << "Enfant 2 : ";
+    for (int gene : enfant2) ss << gene << " ";
+    ss << "\n";
+
+    ss << "============================\n";
+
+    // Afficher dans la console
+    cout << ss.str() << endl;
+
+    // Sauvegarder dans le fichier
+    log(ss.str());
+    // Après mutation ou croisement
+// Vérification enfant1
+for (int capteur = 0; capteur < N_CAPTEURS; capteur++) {
+    int nb1 = 0;
+    int debut = capteur * N_EMPLACEMENTS;
+    for (int j = debut; j < debut + N_EMPLACEMENTS; j++) {
+        if (enfant1[j] == 1) nb1++;
+    }
+    if (nb1 != 1) {
+        log("ERREUR dans enfant1 : Le capteur " + to_string(capteur) + " a " + to_string(nb1) + " emplacements actifs !");
     }
 }
 
+// Vérification enfant2
+for (int capteur = 0; capteur < N_CAPTEURS; capteur++) {
+    int nb1 = 0;
+    int debut = capteur * N_EMPLACEMENTS;
+    for (int j = debut; j < debut + N_EMPLACEMENTS; j++) {
+        if (enfant2[j] == 1) nb1++;
+    }
+    if (nb1 != 1) {
+        log(" ERREUR dans enfant2 : Le capteur " + to_string(capteur) + " a " + to_string(nb1) + " emplacements actifs !");
+    }
+}
+
+
+    return {enfant1, enfant2, point};
+    
+}
+
+
+
+
+
+//
+void mutation(Chromosome& individu, int numero_individu) {
+    random_device rd;
+    mt19937 gen(rd());
+    uniform_real_distribution<> dis(0.0, 1.0);
+
+    Chromosome avant_mutation = individu; // Copier l'individu avant mutation
+    vector<int> points_mutation;          // Liste des indices mutés
+
+    for (int i = 0; i < chromosome_size; i++) {
+        if (dis(gen) < MUTATION_RATE) {
+            individu[i] = 1 - individu[i]; // Inverser le bit
+            points_mutation.push_back(i);  // Stocker le point de mutation
+        }
+    }
+    reparer(individu);
+    
+// Après mutation ou croisement
+for (int capteur = 0; capteur < N_CAPTEURS; capteur++) {
+    int nb1 = 0;
+    int debut = capteur * N_EMPLACEMENTS;
+    for (int j = debut; j < debut + N_EMPLACEMENTS; j++) {
+        if (individu[j] == 1) nb1++;
+    }
+    if (nb1 != 1) {
+        log(" ERREUR : Le capteur " + to_string(capteur) + " a " + to_string(nb1) + " emplacements actifs !");
+    }
+}
+
+    stringstream ss; // ➔ UNE SEULE déclaration ici
+    ss << "\n=== Mutation de l'individu " << numero_individu << " ===\n";
+    ss << "Individu avant mutation : ";
+    for (int gene : avant_mutation) ss << gene << " ";
+    ss << "\n";
+
+    if (!points_mutation.empty()) {
+        ss << "Points de mutation (indices modifiés) : ";
+        for (int idx : points_mutation) ss << idx << " ";
+        ss << "\n";
+    } else {
+        ss << "Aucune mutation effectuée.\n";
+    }
+
+    ss << "Individu après mutation : ";
+    for (int gene : individu) ss << gene << " ";
+    ss << "\n=================\n";
+
+    cout << ss.str();   // Afficher sur console
+    log(ss.str());      // Sauvegarder dans log.txt
+     ss << "\n=================\n";
+}
+
+//
+Population nouvelle_generation(const Population& population) {
+    Population nouvelle_pop;
+
+    random_device rd;
+    mt19937 gen(rd());
+    uniform_real_distribution<> dis(0.0, 1.0);
+
+    while (nouvelle_pop.size() < TAILLE_POPULATION) {
+        Chromosome parent1 = tournoi_selection(population);
+        Chromosome parent2 = tournoi_selection(population);
+
+        Chromosome enfant1 = parent1;
+        Chromosome enfant2 = parent2;
+
+        if (dis(gen) < CROSSOVER_RATE) {
+            tie(enfant1, enfant2, ignore) = croisement(parent1, parent2);
+        }
+
+        mutation(enfant1, nouvelle_pop.size() + 1);
+reparer(enfant1);
+nouvelle_pop.push_back(enfant1);
+
+if (nouvelle_pop.size() < TAILLE_POPULATION) {
+    mutation(enfant2, nouvelle_pop.size() + 1);
+    reparer(enfant2);
+    nouvelle_pop.push_back(enfant2);
+}
+
+    }
+
+    log("Nouvelle génération créée.");
+    log("--------------------------------------------------");
+
+    return nouvelle_pop;
+}
+
+
+//
+void afficher_chromosome(const Chromosome& chromo) {
+    for (bool gene : chromo) {
+        std::cout << gene << " ";
+    }
+    std::cout << std::endl;
+}
+//
+
+//////////////////////////////////////////////////////////////////////////////
+
+void eliminer_capteurs_inferieurs(Chromosome& chromo) {
+    for (int e = 0; e < N_EMPLACEMENTS; ++e) {
+        int meilleur_capteur = -1;
+        double meilleur_rayon = -1.0;
+
+        // Chercher le capteur actif avec le plus grand rayon pour cet emplacement
+        for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
+            int idx = capteur * N_EMPLACEMENTS + e;
+            if (chromo[idx] == 1 && capteurs[capteur].rayon > meilleur_rayon) {
+                meilleur_capteur = capteur;
+                meilleur_rayon = capteurs[capteur].rayon;
+            }
+        }
+
+        // Supprimer les autres capteurs de cet emplacement
+        for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
+            int idx = capteur * N_EMPLACEMENTS + e;
+            if (capteur != meilleur_capteur) {
+                chromo[idx] = 0;
+            }
+        }
+    }
+    eliminer_capteurs_inferieurs(chromo);
+}
+
+
+void reparer(Chromosome& chromo) {
+    int nb_emplacements_par_capteur = N_EMPLACEMENTS;
+
+    for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
+        int debut = capteur * nb_emplacements_par_capteur;
+        int fin = debut + nb_emplacements_par_capteur;
+
+        int compte_1 = 0;
+        vector<int> positions_1;
+
+        for (int i = debut; i < fin; ++i) {
+            if (chromo[i] == 1) {
+                compte_1++;
+                positions_1.push_back(i);
+            }
+        }
+
+        if (compte_1 == 0) {
+            // Aucun emplacement actif ➔ choisir un emplacement aléatoire
+            random_device rd;
+            mt19937 gen(rd());
+            uniform_int_distribution<> dis(debut, fin - 1);
+            int idx = dis(gen);
+            chromo[idx] = 1;
+        } else if (compte_1 > 1) {
+            // Plus d'un 1 ➔ en garder 1 au hasard, mettre 0 aux autres
+            random_device rd;
+            mt19937 gen(rd());
+            shuffle(positions_1.begin(), positions_1.end(), gen);
+            for (size_t k = 1; k < positions_1.size(); ++k) {
+                chromo[positions_1[k]] = 0;
+            }
+        }
+    }
+}
+//bool estSolutionValide(const Chromosome& individu) {
+   // return estCouvertureComplete(individu) && estConnecte(individu);
+//}
+//
 // Écriture des résultats CSV
 void enregistrerResultat(const string& nom, int nb_poi, int nb_caps, bool faisable,
                          int utilises, int nb_couverts, long long temps, int gen, const string& csv) {
@@ -184,108 +617,225 @@ void enregistrerResultat(const string& nom, int nb_poi, int nb_caps, bool faisab
 }
 
 
-// Initialisation fichier CSV
+// Initialisation fichier CSV (sans écraser si déjà existant)
 void initialiserFichierResultats(const string& nomFichier) {
-    ofstream f(nomFichier);
-    f << "Fichier,POI,Capteurs,Faisable,Capteurs_utilisés,POI_Couverts,Temps_ms,Generations\n"; // ajouté POI_Couverts
-    f.close();
+    ifstream f_existant(nomFichier);
+    if (!f_existant.good()) { 
+        // Si le fichier n'existe pas, on le crée avec l'entête
+        ofstream f(nomFichier);
+        f << "Fichier,POI,Capteurs,Faisable,Capteurs_utilisés,POI_Couverts,Temps_ms,Generations\n";
+        f.close();
+    }
+}
+int compter_capteurs_utilises(const Chromosome& chromosome) {
+    return count(chromosome.begin(), chromosome.end(), 1);
+}
+
+int compter_poi_couverts(const Chromosome& individu) {
+    set<int> couverts;
+
+    int nb_emplacements_par_capteur = N_EMPLACEMENTS;
+    for (int capteur = 0; capteur < N_CAPTEURS; capteur++) {
+        int debut = capteur * nb_emplacements_par_capteur;
+        int id_emplacement = -1;
+
+        for (int pos = debut; pos < debut + nb_emplacements_par_capteur; ++pos) {
+            if (individu[pos] == 1) {
+                id_emplacement = pos - debut;
+                break;
+            }
+        }
+
+        if (id_emplacement == -1) continue;
+
+        for (size_t j = 0; j < points_interet.size(); ++j) {
+            if (matrice_distance[id_emplacement][j] <= capteurs[capteur].rayon) {
+                couverts.insert(j);
+            }
+        }
+    }
+    return couverts.size();
 }
 
 
-// MAIN
 int main() {
-//Définit le chemin du dossier contenant les fichiers d'entrée JSON et le nom du fichier CSV de sortie
-    const string dossier = "experiences/";
-    const string fichier_csv = "resultats10.csv";
-//Vérifie si le fichier CSV existe. Sinon, appelle initialiserFichierResultats() pour créer le fichier et écrire l'en-tête (supposé contenir des colonnes comme nom_fichier, faisable
-    if (!filesystem::exists(fichier_csv))
-        initialiserFichierResultats(fichier_csv);
-//Itère sur tous les fichiers du dossier experiences/ pour traiter chaque expérience
-    for (const auto& entry : filesystem::directory_iterator(dossier)) {
- //Récupère le chemin complet du fichier et enregistre l'heure de début pour mesurer le temps d'exécution.   
-        string nom_fichier = entry.path().string();
-        auto debut = chrono::high_resolution_clock::now();
-//Nettoie les variables globales (supposées) avant de traiter un nouveau fichier pour éviter des données résiduelles.
-        emplacements.clear();
-        points_interet.clear();
-        rayons_capteurs.clear();
-        matrice_distance.clear();
-//Lit les emplacements, points d'intérêt et rayons des capteurs depuis le fichier JSON.
-        lireDonneesDepuisJSON(nom_fichier);
-        calculerMatriceDistance();//Calcule la matrice de distance entre chaque emplacement et chaque point d'intérêt (pour optimiser les calculs ultérieurs).
-        Population population = initialiserPopulation();
-// Initialise les variables pour stocker la meilleure solution trouvée, sa fitness, si elle est faisable (couverture complète), et la génération où elle a été trouvée.
-        Chromosome meilleur;
-        double best_fitness = -1e9;
-        bool faisable = false;
-        int generation_finale = -1;
-//Boucle sur un nombre fixe de générations (MAX_GENERATIONS).
-        for (int gen = 1; gen <= MAX_GENERATIONS; ++gen) {
-//    Évalue chaque individu avec fonctionFitness(). //Met à jour la meilleure solution si une fitness supérieure est trouvée. //Vérifie si la solution est faisable via estCouvertureComplete() (couverture totale des points d'intérêt).          
-            for (const Chromosome& ind : population) {
-                double fit = fonctionFitness(ind);
-                if (fit > best_fitness) {
-                    best_fitness = fit;
-                    meilleur = ind;
-                    generation_finale = gen;
-                    faisable = estCouvertureComplete(ind);
-                }
-            }
+    auto debut = chrono::high_resolution_clock::now();
+    ofstream fichier("log.txt");
+    fichier.close(); // vider log.txt
 
-            if (faisable) break;//rrête l'algorithme si une solution faisable est trouvée.
-//Sélectionne des individus par tournoi pour la reproduction.
-            Population nouvelle;
-            for (int i = 0; i < TAILLE_POPULATION; ++i)
-                nouvelle.push_back(tournoiSelection(population));
-//Applique un opérateur de croisement pour générer de nouveaux individus.
-            Population croisee;
-            for (int i = 0; i < TAILLE_POPULATION; i += 2) {
-                auto [e1, e2] = croisement(nouvelle[i], nouvelle[(i + 1) % TAILLE_POPULATION]);
-                croisee.push_back(e1);
-                croisee.push_back(e2);
-            }
- //Applique une mutation aléatoire et remplace l'ancienne population.	           
-            for (Chromosome& ind : croisee)
-                mutation(ind);
-            population = croisee;
-        }
-//Calcule le temps d'exécution en millisecondes.
-        auto fin = chrono::high_resolution_clock::now();
-        auto temps_ms = chrono::duration_cast<chrono::milliseconds>(fin - debut).count();
-//Compte le nombre de capteurs actifs dans la meilleure solution.
-        int capteurs_utiles = 0;
-        for (int i = 0; i < N_CAPTEURS; ++i)
-            if (meilleur[i] != 0) capteurs_utiles++;
-//Si la solution est faisable, calcule le nombre de points d'intérêt couverts. Utilise la matrice_distance pour vérifier la couverture par chaque capteur actif.            
-            int nb_couverts = 0;
-if (faisable) {
-    vector<bool> couverts(points_interet.size(), false);
-    for (int i = 0; i < N_CAPTEURS; ++i) {
-        if (meilleur[i] == 0) continue;
-        int e = meilleur[i] - i * N_EMPLACEMENTS - 1;
-        double rayon = rayons_capteurs[i];
-        for (int j = 0; j < points_interet.size(); ++j) {
-            if (!couverts[j] && matrice_distance[e][j] <= rayon)
-                couverts[j] = true;
-        }
-    }
-    nb_couverts = count(couverts.begin(), couverts.end(), true);
+    initialiserFichierResultats("resultatsaz333.csv"); 
+    lireJSON("config2.json");
+    calculerMatriceDistance();
+    calculerEtAfficherMatriceCouvertureParCapteur(); // afficher la matrice de chaque capteur
+
+    auto population = initialiser_population();
+    afficher_population(population);
+    // Étapes de sélection, croisement et mutation AVANT la première génération
+log("=== Sélection, Croisement et Mutation avant génération 0 ===");
+cout << "=== Sélection, Croisement et Mutation avant génération 0 ===" << endl;
+
+Population nouvelle_population;
+
+while (nouvelle_population.size() < TAILLE_POPULATION) {
+    Chromosome parent1 = tournoi_selection(population);
+Chromosome parent2 = tournoi_selection(population);
+
+    log("Parents sélectionnés :");
+    string ligne1 = "P1: ";
+    string ligne2 = "P2: ";
+    for (int val : parent1) ligne1 += to_string(val) + " ";
+    for (int val : parent2) ligne2 += to_string(val) + " ";
+    log(ligne1);
+    log(ligne2);
+
+    Chromosome enfant1 = parent1;
+    Chromosome enfant2 = parent2;
+
+    random_device rd;
+    mt19937 gen(rd());
+    uniform_real_distribution<> dis(0.0, 1.0);
+
+ if (dis(gen) < CROSSOVER_RATE) {
+    Chromosome e1, e2;
+    int point;
+    tie(e1, e2, point) = croisement(parent1, parent2);
+    enfant1 = e1;
+    enfant2 = e2;
+
+    // Affichage plus complet :
+    cout << "=== Croisement effectué ===" << endl;
+    cout << "Point de croisement : " << point << endl;
+    cout << "Parent 1: ";
+    for (int val : parent1) cout << val << " ";
+    cout << endl;
+    cout << "Parent 2: ";
+    for (int val : parent2) cout << val << " ";
+    cout << endl;
+    cout << "Enfant 1: ";
+    for (int val : enfant1) cout << val << " ";
+    cout << endl;
+    cout << "Enfant 2: ";
+    for (int val : enfant2) cout << val << " ";
+    cout << endl;
+    cout << "============================" << endl;
 }
-//Enregistre les résultats dans le CSV (nom du fichier, nombre de points, capteurs, faisabilité
-        enregistrerResultat(
-    entry.path().filename().string(),
-    points_interet.size(),
-    N_CAPTEURS,
-    faisable,
-    capteurs_utiles,
-    nb_couverts,
-    temps_ms,
-    generation_finale == -1 ? MAX_GENERATIONS : generation_finale,
-    fichier_csv
-);
 
+
+mutation(enfant1, nouvelle_population.size() + 1);
+mutation(enfant2, nouvelle_population.size() + 2);
+
+
+    log("Après mutation:");
+    string mutation1 = "M1: ";
+    string mutation2 = "M2: ";
+    for (int val : enfant1) mutation1 += to_string(val) + " ";
+    for (int val : enfant2) mutation2 += to_string(val) + " ";
+    log(mutation1);
+    log(mutation2);
+
+    nouvelle_population.push_back(enfant1);
+    if (nouvelle_population.size() < TAILLE_POPULATION)
+        nouvelle_population.push_back(enfant2);
+            cout << "============================" << endl;
+}
+
+log("=== Nouvelle population après sélection, croisement, mutation ===");
+cout << "=== Nouvelle population après sélection, croisement, mutation ===" << endl;
+afficher_population(nouvelle_population);
+
+// Remplacer la population initiale par la nouvelle
+population = nouvelle_population;
+
+
+    Chromosome meilleur;
+    double best_fitness = 0.0;
+    int generation_finale = 0;
+    bool faisable = false;
+
+
+
+
+// Variables pour détecter la stagnation
+int stagnation = 0;
+int stagnation_max = 10; // Exemple: 10 générations sans amélioration
+double best_fitness_precedent = 0.0;
+
+for (int gen = 0; gen < N_GENERATIONS; ++gen) {
+    log("*******************");
+    log("Génération " + to_string(gen));
+    log("*******************");
+
+    for (const Chromosome& ind : population) {
+        double fit = fonctionFitness(ind);
+
+        string texte = "Individu : ";
+        for (int gene : ind) texte += to_string(gene) + " ";
+        texte += "| Fitness = " + to_string(fit);
+        log(texte);
+
+        if (fit > best_fitness) {
+            best_fitness = fit;
+            meilleur = ind;
+            generation_finale = gen;
+            faisable = true;
+        }
     }
-// Affiche un message de succès et termine le programm
-    cout << "\n Toutes les expériences ont été traitées.\n";
+
+    log("Fin de l'évaluation de la génération.");
+    log("--------------------------------------------------");
+
+    // Détection stagnation
+    if (best_fitness == best_fitness_precedent) {
+        stagnation++;
+    } else {
+        stagnation = 0;
+        best_fitness_precedent = best_fitness;
+    }
+
+    if (stagnation >= stagnation_max) {
+        cout << "Arrêt anticipé : stagnation détectée (" << stagnation_max << " générations sans amélioration)." << endl;
+        log("Arrêt anticipé : stagnation détectée.");
+        break;
+    }
+
+    if (gen != N_GENERATIONS - 1) {
+        population = nouvelle_generation(population);
+    }
+}
+
+
+    if (faisable) {
+        log("Meilleure solution trouvée à la génération " + to_string(generation_finale));
+        log("Fitness : " + to_string(best_fitness));
+        log("Chromosome : ");
+        string texte = "";
+        for (int gene : meilleur) texte += to_string(gene) + " ";
+        log(texte);
+    } else {
+        log("Aucune solution réalisable trouvée.");
+    }
+
+    cout << "Fin de l'exécution. Voir log.txt." << endl;
+     auto fin = chrono::high_resolution_clock::now();
+     auto temps_ms = chrono::duration_cast<chrono::milliseconds>(fin - debut).count();
+     cout << "Temps total d'exécution : " << temps_ms << " ms\n";
+
+int meilleur_nb_capteurs = compter_capteurs_utilises(meilleur);
+
+    cout << "\n=== Résultat final ===\n";
+    if (faisable) {
+        cout << "Solution trouvée en " << generation_finale << " générations.\n";
+        cout << "Nombre de capteurs utilisés : " << meilleur_nb_capteurs << "\n";
+        int nb_poi_couverts = compter_poi_couverts(meilleur);
+        cout << "Points d'intérêt couverts : " << nb_poi_couverts << "\n";
+        afficher_chromosome(meilleur);
+
+        enregistrerResultat("config2.json", points_interet.size(), capteurs.size(), true,
+                            meilleur_nb_capteurs, nb_poi_couverts, temps_ms, generation_finale, "resultatsaz333.csv");
+    } else {
+        cout << "Pas de solution faisable trouvée.\n";
+        enregistrerResultat("config2.json", points_interet.size(), capteurs.size(), false,
+                            0, 0, temps_ms, N_GENERATIONS, "resultatsaz333.csv");
+    }
     return 0;
 }
