@@ -59,7 +59,7 @@ typedef vector<Chromosome> Population;      // Ensemble d'individus formant une 
 Chromosome meilleure_solution;
 double meilleure_fitness = 0.0;
 
-void reparer(Chromosome& chromo);
+//void reparer(Chromosome& chromo);
 
 // Permet d'écrire une ligne de texte dans le fichier log.txt (mode append)
 void log(string texte) {
@@ -279,19 +279,20 @@ int CountCoveredPOI(const Chromosome& individu) {
         }
     }
 }*/
+/*
 void reparer(Chromosome& chromo) {
     set<int> emplacements_utilises;
     vector<bool> points_couverts(points_interet.size(), false);
     int capteurs_utilises = 0;
-
-    // Étape 1: Réparer les doublons intelligemment
-    for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
-        if (chromo[capteur] != -1) {
-            if (emplacements_utilises.count(chromo[capteur])) {
+//Trouver le meilleur emplacement des capteur 
+    // Étape 1: Réparer les doublons intelligemment//tboucer 3la chromose li ma7tot w t7awes 3la meihir emplacemetn  et sovgarder nb point couvert 
+    for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {//si le capteur palcer ou non 
+        if (chromo[capteur] != -1) { //cpateur placer 
+            if (emplacements_utilises.count(chromo[capteur])) {//si emplacement fih capteur ou non 
                 // Trouver le meilleur emplacement alternatif
                 int meilleur_emp = -1;
                 double meilleure_couverture = -1;
-                
+    //            
                 for (int emp = 0; emp < N_EMPLACEMENTS; ++emp) {
                     if (!emplacements_utilises.count(emp)) {
                         double couverture = 0;
@@ -314,15 +315,15 @@ void reparer(Chromosome& chromo) {
                     continue;
                 }
             }
-            
+            //emp=emplacemet de capteur 
             // Mettre à jour la couverture
             int emp = chromo[capteur];
-            emplacements_utilises.insert(emp);
+            emplacements_utilises.insert(emp);// ye3ni khdemna bel emplacement bache ki nbouclkou mayediche hada emp
             capteurs_utilises++;
             double rayon = capteurs[capteur].rayon;
             for (size_t j = 0; j < points_interet.size(); ++j) {
                 if (matrice_distance[emp][j] <= rayon) {
-                    points_couverts[j] = true;
+                    points_couverts[j] = true;//koul point interet couvert ndirouh true
                 }
             }
         }
@@ -334,7 +335,7 @@ void reparer(Chromosome& chromo) {
         amelioration = false;
         
         // Essayer d'ajouter/améliorer un capteur
-        for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
+        for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {// sur capteur decativer
             if (chromo[capteur] == -1) { // Capteur disponible
                 // Trouver le meilleur emplacement pour ce capteur
                 int meilleur_emp = -1;
@@ -370,7 +371,7 @@ void reparer(Chromosome& chromo) {
             }
         }
     } while (amelioration);
-}
+}*/
 
 // Évalue la qualité (fitness) d'un individu (chromosome) en fonction de la couverture et du nombre de capteurs utiles
 double fonctionFitness(const Chromosome& individu) {
@@ -586,8 +587,8 @@ Population crossover(const Population& selected_population, float crossover_rate
             for (int g : child2) fichier << g << " ";
             fichier << "]\n";
 
-            reparer(child1);
-            reparer(child2);
+         //   reparer(child1);
+          //  reparer(child2);
             
             fichier << "Enfant 1 après réparation: [ ";
             for (int g : child1) fichier << g << " ";
@@ -658,7 +659,7 @@ void mutation(Population& population, double mutation_rate, int n_emplacements) 
             for (int g : population[idx]) fichier << g << " ";
             fichier << "]\n";
             
-            reparer(population[idx]);
+        //    reparer(population[idx]);
             fichier << "Après réparation: [ ";
             for (int g : population[idx]) fichier << g << " ";
             fichier << "] Nouvelle fitness: " << fonctionFitness(population[idx]) << "\n";
@@ -733,7 +734,7 @@ void remplacement(Population& population, const Population& enfants, int elite_c
             for (int j = 0; j < N_CAPTEURS; ++j) {
                 nouveau.push_back(rand() % N_EMPLACEMENTS);
             }
-            reparer(nouveau);
+          //  reparer(nouveau);
             nouvelle_population.push_back(nouveau);
             
             fichier << "Nouvel individu " << i+1 << ": [ ";
@@ -831,7 +832,7 @@ int main() {
         // Étape 5 : Réparation des solutions invalides
         for (auto& individu : crossed_population) {
             if (!estCouvertureComplete(individu)) {
-                reparer(individu);
+                //reparer(individu);
             }
         }
 
