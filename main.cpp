@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <iomanip> 
 #include <nlohmann/json.hpp>
+
+#include <chrono>  // pour mesurer le temps
+
 using namespace std;
 using json = nlohmann::json; // Alias pour simplifier l'utilisation de la bibliothèque JSON
 
@@ -227,157 +230,11 @@ int CountCoveredPOI(const Chromosome& individu) {
     return couverts.size() ;
 }
 
-/*void eliminerCapteursInutiles(Chromosome& individu) {
-    vector<bool> deja_couvert(points_interet.size(), false);
-
-    // Marque les points déjà couverts par les capteurs utiles
-    for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
-        int emplacement = individu[capteur];
-        if (emplacement == -1) continue;
-
-        double rayon = capteurs[capteur].rayon;
-        for (size_t j = 0; j < points_interet.size(); ++j) {
-            if (matrice_distance[emplacement][j] <= rayon) {
-                deja_couvert[j] = true;
-            }
-        }
-    }
-
-    // Pour chaque capteur, on vérifie s’il est indispensable
-    for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {
-        int emplacement = individu[capteur];
-        if (emplacement == -1) continue;
-
-        double rayon = capteurs[capteur].rayon;
-        bool est_util = false;
-
-        // Simuler la suppression du capteur
-        for (size_t j = 0; j < points_interet.size(); ++j) {
-            if (matrice_distance[emplacement][j] <= rayon) {
-                // On vérifie si ce point serait découvert sans ce capteur
-                bool couvert_autrement = false;
-                for (int autre = 0; autre < N_CAPTEURS; ++autre) {
-                    if (autre == capteur) continue;
-                    int autre_emp = individu[autre];
-                    if (autre_emp == -1) continue;
-
-                    double r2 = capteurs[autre].rayon;
-                    if (matrice_distance[autre_emp][j] <= r2) {
-                        couvert_autrement = true;
-                        break;
-                    }
-                }
-                if (!couvert_autrement) {
-                    est_util = true;
-                    break; // Dès qu’un point n’est couvert que par ce capteur
-                }
-            }
-        }
-
-        if (!est_util) {
-            individu[capteur] = -1; // Marquer ce capteur comme inutile
-        }
-    }
-}*/
-/*
-void reparer(Chromosome& chromo) {
-    set<int> emplacements_utilises;
-    vector<bool> points_couverts(points_interet.size(), false);
-    int capteurs_utilises = 0;
-//Trouver le meilleur emplacement des capteur 
-    // Étape 1: Réparer les doublons intelligemment//tboucer 3la chromose li ma7tot w t7awes 3la meihir emplacemetn  et sovgarder nb point couvert 
-    for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {//si le capteur palcer ou non 
-        if (chromo[capteur] != -1) { //cpateur placer 
-            if (emplacements_utilises.count(chromo[capteur])) {//si emplacement fih capteur ou non 
-                // Trouver le meilleur emplacement alternatif
-                int meilleur_emp = -1;
-                double meilleure_couverture = -1;
-    //            
-                for (int emp = 0; emp < N_EMPLACEMENTS; ++emp) {
-                    if (!emplacements_utilises.count(emp)) {
-                        double couverture = 0;
-                        for (size_t j = 0; j < points_interet.size(); ++j) {
-                            if (!points_couverts[j] && matrice_distance[emp][j] <= capteurs[capteur].rayon) {
-                                couverture++;
-                            }
-                        }
-                        if (couverture > meilleure_couverture) {
-                            meilleure_couverture = couverture;
-                            meilleur_emp = emp;
-                        }
-                    }
-                }
-                
-                if (meilleur_emp != -1) {
-                    chromo[capteur] = meilleur_emp;
-                } else {
-                    chromo[capteur] = -1; // Désactiver ce capteur
-                    continue;
-                }
-            }
-            //emp=emplacemet de capteur 
-            // Mettre à jour la couverture
-            int emp = chromo[capteur];
-            emplacements_utilises.insert(emp);// ye3ni khdemna bel emplacement bache ki nbouclkou mayediche hada emp
-            capteurs_utilises++;
-            double rayon = capteurs[capteur].rayon;
-            for (size_t j = 0; j < points_interet.size(); ++j) {
-                if (matrice_distance[emp][j] <= rayon) {
-                    points_couverts[j] = true;//koul point interet couvert ndirouh true
-                }
-            }
-        }
-    }
-
-    // Étape 2: Amélioration progressive plutôt que couverture totale obligatoire
-    bool amelioration;
-    do {
-        amelioration = false;
-        
-        // Essayer d'ajouter/améliorer un capteur
-        for (int capteur = 0; capteur < N_CAPTEURS; ++capteur) {// sur capteur decativer
-            if (chromo[capteur] == -1) { // Capteur disponible
-                // Trouver le meilleur emplacement pour ce capteur
-                int meilleur_emp = -1;
-                int max_couverture = 0;
-                
-                for (int emp = 0; emp < N_EMPLACEMENTS; ++emp) {
-                    if (!emplacements_utilises.count(emp)) {
-                        int couverture = 0;
-                        for (size_t j = 0; j < points_interet.size(); ++j) {
-                            if (!points_couverts[j] && matrice_distance[emp][j] <= capteurs[capteur].rayon) {
-                                couverture++;
-                            }
-                        }
-                        if (couverture > max_couverture) {
-                            max_couverture = couverture;
-                            meilleur_emp = emp;
-                        }
-                    }
-                }
-                
-                if (meilleur_emp != -1 && max_couverture > 0) {
-                    chromo[capteur] = meilleur_emp;
-                    emplacements_utilises.insert(meilleur_emp);
-                    capteurs_utilises++;
-                    double rayon = capteurs[capteur].rayon;
-                    for (size_t j = 0; j < points_interet.size(); ++j) {
-                        if (matrice_distance[meilleur_emp][j] <= rayon) {
-                            points_couverts[j] = true;
-                        }
-                    }
-                    amelioration = true;
-                }
-            }
-        }
-    } while (amelioration);
-}*/
-
 // Évalue la qualité (fitness) d'un individu (chromosome) en fonction de la couverture et du nombre de capteurs utiles
 double fonctionFitness(const Chromosome& individu) {
     
     int capteurs_utilises = count_if(individu.begin(), individu.end(), 
-                                   [](int emp) { return emp != -1; });
+                                   [](int emp) { return emp != -1; });//combien de capteur utilser
     
     // Priorité 1: couverture complète
     // Priorité 2: minimiser le nombre de capteurs
@@ -474,6 +331,7 @@ vector<vector<int>> selectionParTournoiAvecLog(const vector<vector<int>>& popula
     fichier << "=== Fin de la sélection ===\n";
     fichier << "--------------------------------------------------\n";
     fichier.close(); // ferme correctement le fichier
+    afficher_population(nouvellePopulation);
 
     return nouvellePopulation;
 }
@@ -550,6 +408,8 @@ Population crossover(const Population& selected_population, float crossover_rate
     random_device rd;
     mt19937 gen(rd());
     uniform_real_distribution<> prob(0.0, 1.0);
+    //Elle mélange (shuffle) les chromosomes de la population sélectionnée de manière aléatoire
+    // avant de former les paires de parents.
     shuffle(parents.begin(), parents.end(), gen);
 
     fichier << "\n=== DEBUT CROISEMENT ===\n";
@@ -587,8 +447,9 @@ Population crossover(const Population& selected_population, float crossover_rate
             for (int g : child2) fichier << g << " ";
             fichier << "]\n";
 
-         //   reparer(child1);
-          //  reparer(child2);
+            child1 = fixDuplicates(child1, chromosome_size);
+            child2 = fixDuplicates(child2, chromosome_size);
+            
             
             fichier << "Enfant 1 après réparation: [ ";
             for (int g : child1) fichier << g << " ";
@@ -617,7 +478,8 @@ Population crossover(const Population& selected_population, float crossover_rate
     fichier << "=== FIN CROISEMENT ===\n";
     fichier << "Nombre total d'enfants générés: " << new_population.size() << "\n\n";
     fichier.close();
-    
+    afficher_population(new_population);
+
     return new_population;
 }
 // Applique une mutation sur chaque individu de la population
@@ -671,6 +533,8 @@ void mutation(Population& population, double mutation_rate, int n_emplacements) 
     fichier << "\nTotal mutations appliquées: " << total_mutations << "\n";
     fichier << "=== FIN MUTATION ===\n\n";
     fichier.close();
+    afficher_population(population);
+
 }
 void remplacement(Population& population, const Population& enfants, int elite_count) {
     ofstream fichier("log.txt", ios::app);
@@ -760,15 +624,26 @@ void remplacement(Population& population, const Population& enfants, int elite_c
     fichier << "=== FIN REMPLACEMENT ===\n\n";
     fichier.close();
 }
-/*
 
-}*/
+// Initialisation fichier CSV (sans écraser si déjà existant)
+void initialiserFichierResultats(const string& nomFichier) {
+    ifstream f_existant(nomFichier);
+    if (!f_existant.good() || f_existant.peek() == ifstream::traits_type::eof()) {
+        // Si le fichier n'existe pas ou est vide, on écrit l'entête
+        ofstream f(nomFichier);
+        f << "Fichier,POI,Capteurs,Faisable,Capteurs_utilisés,POI_Couverts,duration,Generations\n";
+        f.close();
+    }
+}
+
 int main() {
     // Vider le fichier log
     ofstream fichier("log.txt");
     fichier.close();
+    auto start_time = chrono::high_resolution_clock::now();
 
     // Charger les données
+    initialiserFichierResultats("resultats.csv"); 
     lireJSON("config1.json");
     calculerMatriceDistance();
     calculerEtAfficherMatriceCouvertureParCapteur();
@@ -822,7 +697,7 @@ int main() {
 
         // Étape 2 : Sélection 
         Population selected_population = selectionParTournoiAvecLog(population, TOURNAMENT_SIZE);
-
+      
         // Étape 3 : Croisement
         Population crossed_population = crossover(selected_population, CROSSOVER_RATE, chromosome_size);
 
@@ -856,33 +731,46 @@ int main() {
 log("\n=== RESULTAT FINAL ===");
 log("Nombre total de générations: " + to_string(generation));
 log("Dernier compteur de stagnation: " + to_string(stagnation_count));
+ 
+auto end_time = chrono::high_resolution_clock::now();
+auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time).count();
 
 // Sauvegarde de la meilleure solution trouvée
 ofstream final_solution("meilleure_solution_finale.txt");
 if (final_solution.is_open()) {
-    if (meilleure_fitness_globale <= 0) { // Aucune solution valide trouvée
+    if (meilleure_fitness_globale <= 0) {
         final_solution << "Aucune solution valide n'a été trouvée après " 
                       << generation << " générations.\n";
+
         cout << "\n=== AUCUNE SOLUTION VALIDE TROUVÉE ===" << endl;
         cout << "L'algorithme n'a pas trouvé de configuration de capteurs" << endl;
-        cout << "couvrant tous les points d'intérêt après " << generation 
-             << " générations." << endl;
+        cout << "couvrant tous les points d'intérêt après " 
+             << generation << " générations." << endl;
     } else {
+        int nb_capteurs = count_if(meilleure_solution_globale.begin(),
+                                   meilleure_solution_globale.end(),
+                                   [](int x) { return x != -1; });
+
+        int nb_points_couverts = CountCoveredPOI(meilleure_solution_globale);
+
         final_solution << "Meilleure solution globale (fitness = " 
                       << meilleure_fitness_globale << "):\n";
         final_solution << "Nombre de capteurs utilisés: " 
-                      << count_if(meilleure_solution_globale.begin(), 
-                                 meilleure_solution_globale.end(), 
-                                 [](int x) { return x != -1; }) << "\n";
-        
+                      << nb_capteurs << "\n";
+        final_solution << "Nombre de points d’intérêt couverts: " 
+                      << nb_points_couverts << "\n";
+
         final_solution << "Configuration: ";
         for (int gene : meilleure_solution_globale) {
             final_solution << gene << " ";
         }
-        
+        final_solution << "\n";
+
         // Affichage console
-        cout << "\n=== SOLUTION OPTIMALE TROUVEE ===" << endl;
-        cout << "Capteurs utilises: ";
+        cout << "\n=== SOLUTION OPTIMALE TROUVÉE ===" << endl;
+        cout << "Capteurs utilisés: " << nb_capteurs << endl;
+        cout << "Points d’intérêt couverts: " << nb_points_couverts << endl;
+
         for (size_t i = 0; i < meilleure_solution_globale.size(); ++i) {
             if (meilleure_solution_globale[i] != -1) {
                 cout << "Capteur " << i << " -> Position " 
@@ -893,6 +781,7 @@ if (final_solution.is_open()) {
     }
     final_solution.close();
 }
+
     // Affichage console
     cout << "\n=== SOLUTION OPTIMALE TROUVEE ===" << endl;
     cout << "Capteurs utilises: ";
@@ -903,6 +792,29 @@ if (final_solution.is_open()) {
         }
     }
     cout << "Fitness: " << meilleure_fitness_globale << endl;
+    ofstream result_csv("resultats.csv", ios::app); // 'append' pour ne pas écraser les précédents
+
+if (result_csv.is_open()) {
+    string nom_fichier = "config1.json";  // Tu peux le rendre dynamique si besoin
+    int nb_POI = points_interet.size();
+    int nb_capteurs = capteurs.size();
+    int capteurs_utilises = count_if(meilleure_solution_globale.begin(), meilleure_solution_globale.end(),
+                                     [](int x) { return x != -1; });
+    int poi_couverts = CountCoveredPOI(meilleure_solution_globale);
+    string faisable = (estCouvertureComplete(meilleure_solution_globale)) ? "Oui" : "Non";
+
+    result_csv << nom_fichier << "," 
+               << nb_POI << ","
+               << nb_capteurs << ","
+               << faisable << ","
+               << capteurs_utilises << ","
+               << poi_couverts << ","
+               << duration << ","
+               << generation << "\n";
+
+    result_csv.close();
+}
+
 
     return 0;
 }
