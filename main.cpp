@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <iomanip> 
 #include <nlohmann/json.hpp>
+#include <map>
 
 #include <chrono>  // pour mesurer le temps
 
@@ -46,14 +47,14 @@ int TAILLE_POPULATION;       // Nombre d'individus dans chaque génération
 int N_GENERATIONS;           // Nombre total de générations à simuler
 double MUTATION_RATE;        // Taux de mutation appliqué aux chromosomes
 double CROSSOVER_RATE;       // Taux de croisement entre individus
-int TOURNAMENT_SIZE =0;         // Taille d’un tournoi lors de la sélection
+int TOURNAMENT_SIZE =0;         // Taille d'un tournoi lors de la sélection
 int N_CAPTEURS = 0;          // Nombre de capteurs à placer
 int N_EMPLACEMENTS = 0;      // Nombre de positions possibles pour chaque capteur
 int chromosome_size = 0;     // Taille d'un chromosome (produit de capteurs × emplacements)
 // === Conteneurs globaux ===
 vector<Capteur> capteurs;                   // Liste de capteurs disponibles
-vector<PointInteret> points_interet;        // Points d’intérêt à couvrir
-vector<Position> emplacements;              // Positions où l’on peut placer un capteur
+vector<PointInteret> points_interet;        // Points d'intérêt à couvrir
+vector<Position> emplacements;              // Positions où l'on peut placer un capteur
 vector<vector<double>> matrice_distance;    // Matrice des distances entre emplacements et points
 
 // === Alias pour types génétiques ===
@@ -61,6 +62,12 @@ typedef vector<int> Chromosome;             //
 typedef vector<Chromosome> Population;      // Ensemble d'individus formant une population
 Chromosome meilleure_solution;
 double meilleure_fitness = 0.0;
+
+// Déclarations des fonctions
+int CountCoveredPOI(const Chromosome& individu);
+bool estCouvertureComplete(const Chromosome& individu);
+double fonctionFitness(const Chromosome& individu);
+void lireJSON(string nom_fichier, int instance_index);
 
 //void reparer(Chromosome& chromo);
 
@@ -295,93 +302,85 @@ vector<vector<int>> selectionParTournoiAvecLog(const vector<vector<int>>& popula
     }
 
     fichier << "=== Début de la sélection par tournoi ===\n";
-
+    // Initialise la nouvelle population qui sera retournée
     vector<vector<int>> nouvellePopulation;
-    random_device rd;
+    random_device rd;    // Initialise le générateur de nombres aléatoires
     mt19937 gen(rd());
-    uniform_int_distribution<> dist(0, population.size() - 1);
-
+    uniform_int_distribution<> dist(0, population.size() - 1);    // Distribution uniforme pour sélectionner aléatoirement des individus
+    // Pour chaque individu à sélectionner dans la nouvelle population
     for (size_t i = 0; i < population.size(); ++i) {
         double meilleureFitness = -1.0;
         vector<int> meilleurIndividu;
-
+        // Loggue le numéro du tournoi
         fichier << "Tournoi #" << i + 1 << ":\n";
-
+        // Effectue le tournoi avec 'tournament_size' participants
         for (int j = 0; j < tournament_size; ++j) {
-            const vector<int>& candidat = population[dist(gen)];
-            double fitness = fonctionFitness(candidat);
-
+            const vector<int>& candidat = population[dist(gen)];// sélectionne un candidat aléatoire
+            double fitness = fonctionFitness(candidat);// Calcule sa fitness
+            // Loggue les détails du candidat
             fichier << "  Candidat " << j + 1 << " : [";
             for (int g : candidat) fichier << g << " ";
             fichier << "] fitness = " << fitness << "\n";
-
+            // Met à jour le meilleur candidat du tournoi
             if (meilleurIndividu.empty() || fitness > meilleureFitness) {
                 meilleureFitness = fitness;
                 meilleurIndividu = candidat;
             }
         }
-
+        // Loggue le gagnant du tournoi
         fichier << "  → Sélectionné : [";
         for (int g : meilleurIndividu) fichier << g << " ";
         fichier << "] fitness = " << meilleureFitness << "\n\n";
-
+        // Ajoute le gagnant à la nouvelle population
         nouvellePopulation.push_back(meilleurIndividu);
     }
-
+    // Loggue la fin de la sélection
     fichier << "=== Fin de la sélection ===\n";
     fichier << "--------------------------------------------------\n";
     fichier.close(); // ferme correctement le fichier
-    afficher_population(nouvellePopulation);
+    afficher_population(nouvellePopulation);    // Affiche la nouvelle population
 
     return nouvellePopulation;
 }
 
 
 
-// Lit la configuration du problème depuis un fichier JSON et initialise les structures globales
-void lireJSON(string nom_fichier) {
-    ifstream input(nom_fichier); // Ouvre le fichier JSON
-    json j;
-    input >> j; // Parse le fichier dans un objet JSON
-
+// Nouvelle fonction pour lire une instance depuis un objet json image
+void lireInstanceDepuisObjet(const json& image_obj, const json& genetic_params) {
     // Chargement des capteurs
-    for (auto& c : j["capteurs"]) {
-        capteurs.push_back({c["id"], c["rayon"]}); 
+    for (auto& c : image_obj["sensors"]) {
+        capteurs.push_back({c["id"], c["range"]});
     }
-    // Chargement des points d'intérêt
-    for (auto& p : j["points_interet"]) {
-        points_interet.push_back({p["id"], {p["x"], p["y"]}});
+    // Chargement des points d'intérêt (POI)
+    for (auto& p : image_obj["pois"]) {
+        points_interet.push_back({0, {p["x"], p["y"]}});
     }
-
     // Chargement des emplacements
-    for (auto& e : j["emplacements"]) {
-        emplacements.push_back({e["x"], e["y"]});
+    for (auto& p : image_obj["locations"]) {
+        emplacements.push_back({p["x"], p["y"]});
     }
-
     // Chargement des paramètres génétiques
-    TAILLE_POPULATION = j["genetic_params"]["population_size"];
-    N_GENERATIONS = j["genetic_params"]["generations"];
-    MUTATION_RATE = j["genetic_params"]["mutation_rate"];
-    CROSSOVER_RATE = j["genetic_params"]["crossover_rate"];
-    TOURNAMENT_SIZE = j["genetic_params"]["tournament_size"];
-
-    // Calculs dérivés
+    TAILLE_POPULATION = genetic_params["population_size"];
+    N_GENERATIONS = genetic_params["generations"];
+    MUTATION_RATE = genetic_params["mutation_rate"];
+    CROSSOVER_RATE = genetic_params["crossover_rate"];
+    TOURNAMENT_SIZE = genetic_params["tournament_size"];
     N_CAPTEURS = capteurs.size();
     N_EMPLACEMENTS = emplacements.size();
-    chromosome_size = N_CAPTEURS ; // Longueur totale du chromosome
-} 
-//
+    chromosome_size = N_CAPTEURS;
+}
+
 // Corriger les doublons dans un chromosome
 Chromosome fixDuplicates(const Chromosome& chromosome, int chromosome_size) {
-    set<int> seen;
-    set<int> all_genes;
+    set<int> seen; // Ensemble pour suivre les gènes déjà vus
+    set<int> all_genes;// Ensemble de tous les gènes possibles
     for (int i = 0; i < chromosome_size; ++i) {
         all_genes.insert(i);
     }
-
     Chromosome fixed;
+        // Pour chaque gène dans le chromosome
     for (int gene : chromosome) {
-        if (seen.find(gene) == seen.end()) {
+        if (seen.find(gene) == seen.end()) { // Si le gène n'a pas encore été vu
             fixed.push_back(gene);
             seen.insert(gene);
         } else {
@@ -390,7 +389,7 @@ Chromosome fixDuplicates(const Chromosome& chromosome, int chromosome_size) {
             set_difference(all_genes.begin(), all_genes.end(),
                            seen.begin(), seen.end(),
                            inserter(unused_genes, unused_genes.begin()));
-
+            // Prend le premier gène non utilisé
             int replacement = *unused_genes.begin();
             fixed.push_back(replacement);
             seen.insert(replacement);
@@ -403,42 +402,41 @@ Chromosome fixDuplicates(const Chromosome& chromosome, int chromosome_size) {
 Population crossover(const Population& selected_population, float crossover_rate, int chromosome_size) {
     ofstream fichier("log.txt", ios::app);
     Population new_population;
-    vector<Chromosome> parents = selected_population;
-
+    vector<Chromosome> parents = selected_population;  // Copie la population sélectionnée
+    // Initialise le générateur aléatoire
     random_device rd;
     mt19937 gen(rd());
-    uniform_real_distribution<> prob(0.0, 1.0);
+    uniform_real_distribution<> prob(0.0, 1.0);  // Pour décider si on fait un croisement
     //Elle mélange (shuffle) les chromosomes de la population sélectionnée de manière aléatoire
     // avant de former les paires de parents.
-    shuffle(parents.begin(), parents.end(), gen);
+    shuffle(parents.begin(), parents.end(), gen);// Mélange les parents aléatoirement
 
     fichier << "\n=== DEBUT CROISEMENT ===\n";
     fichier << "Nombre de parents: " << parents.size() << "\n";
     fichier << "Taux de croisement: " << crossover_rate << "\n";
-
+    // Parcourt les parents par paires
     for (size_t i = 0; i + 1 < parents.size(); i += 2) {
         fichier << "\nPaire de parents " << i/2 + 1 << ":\n";
-        fichier << "Parent 1: [ ";
+        fichier << "Parent 1: [ ";        // Loggue le premier parent
         for (int g : parents[i]) fichier << g << " ";
         fichier << "] Fitness: " << fonctionFitness(parents[i]) << "\n";
-        fichier << "Parent 2: [ ";
+        fichier << "Parent 2: [ ";        // Loggue le second parent
         for (int g : parents[i+1]) fichier << g << " ";
         fichier << "] Fitness: " << fonctionFitness(parents[i+1]) << "\n";
-
+        // Décide si on fait un croisement
         if (prob(gen) < crossover_rate) {
+                        // Choisit un point de croisement aléatoire
             uniform_int_distribution<> point_dist(1, chromosome_size - 1);
-            int crossover_point = point_dist(gen);
-            
+            int crossover_point = point_dist(gen); 
             Chromosome child1, child2;
             
-            // Premier enfant
+        // Premier enfant: début parent1 + fin parent2
             child1.insert(child1.end(), parents[i].begin(), parents[i].begin() + crossover_point);
             child1.insert(child1.end(), parents[i+1].begin() + crossover_point, parents[i+1].end());
-            
-            // Deuxième enfant
+     // Second enfant: début parent2 + fin parent1
             child2.insert(child2.end(), parents[i+1].begin(), parents[i+1].begin() + crossover_point);
             child2.insert(child2.end(), parents[i].begin() + crossover_point, parents[i].end());
-            
+    // Loggue les enfants avant réparation  
             fichier << "Croisement au point " << crossover_point << "\n";
             fichier << "Enfant 1 avant réparation: [ ";
             for (int g : child1) fichier << g << " ";
@@ -446,39 +444,38 @@ Population crossover(const Population& selected_population, float crossover_rate
             fichier << "Enfant 2 avant réparation: [ ";
             for (int g : child2) fichier << g << " ";
             fichier << "]\n";
-
+            // Répare les doublons
             child1 = fixDuplicates(child1, chromosome_size);
             child2 = fixDuplicates(child2, chromosome_size);
-            
-            
+         // Loggue les enfants après réparation
             fichier << "Enfant 1 après réparation: [ ";
             for (int g : child1) fichier << g << " ";
             fichier << "] Fitness: " << fonctionFitness(child1) << "\n";
             fichier << "Enfant 2 après réparation: [ ";
             for (int g : child2) fichier << g << " ";
             fichier << "] Fitness: " << fonctionFitness(child2) << "\n";
-            
+     // Ajoute les enfants à la nouvelle population    
             new_population.push_back(child1);
             new_population.push_back(child2);
-        } else {
+        } else {  // Si pas de croisement, ajoute les parents tels quels
             fichier << "Pas de croisement (taux non atteint)\n";
             fichier << "Enfants identiques aux parents\n";
             new_population.push_back(parents[i]);
             new_population.push_back(parents[i+1]);
         }
     }
-    
+// Gère le cas où le nombre de parents est impair
     if (parents.size() % 2 != 0) {
         fichier << "\nParent impair non apparié ajouté tel quel: [ ";
         for (int g : parents.back()) fichier << g << " ";
         fichier << "] Fitness: " << fonctionFitness(parents.back()) << "\n";
         new_population.push_back(parents.back());
     }
-    
+       // Loggue la fin du croisement 
     fichier << "=== FIN CROISEMENT ===\n";
     fichier << "Nombre total d'enfants générés: " << new_population.size() << "\n\n";
     fichier.close();
-    afficher_population(new_population);
+    afficher_population(new_population);   // Affiche la nouvelle population
 
     return new_population;
 }
@@ -488,34 +485,35 @@ void mutation(Population& population, double mutation_rate, int n_emplacements) 
     ofstream fichier("log.txt", ios::app);
     random_device rd;
     mt19937 gen(rd());
-    uniform_real_distribution<> dis(0.0, 1.0);
-    
+    uniform_real_distribution<> dis(0.0, 1.0); // Pour décider si on mute un gène
+       // Loggue le début de la mutation 
     fichier << "\n=== DEBUT MUTATION ===\n";
     fichier << "Taux de mutation: " << mutation_rate << "\n";
     fichier << "Nombre d'individus: " << population.size() << "\n";
     
     int total_mutations = 0;
-    
+       // Pour chaque individu de la population 
     for (size_t idx = 0; idx < population.size(); ++idx) {
         bool individu_mute = false;
-        fichier << "\nIndividu " << idx+1 << " avant mutation: [ ";
+        fichier << "\nIndividu " << idx+1 << " avant mutation: [ ";        // Loggue l'individu avant mutation
         for (int g : population[idx]) fichier << g << " ";
         fichier << "] Fitness: " << fonctionFitness(population[idx]) << "\n";
-        
+         // Pour chaque gène de l'individu
         for (auto& gene : population[idx]) {
-            if (dis(gen) < mutation_rate) {
+            if (dis(gen) < mutation_rate) {  // Décide si on mute ce gène
                 int old_gene = gene;
-                if (dis(gen) < 0.5) {
+                if (dis(gen) < 0.5) { // Décide aléatoirement le type de mutation
                     gene = -1; //-1 semble représenter un capteur désactivé/Cela permet d'explorer des solutions avec moins de capteurs
                 } else {
-                    gene = rand() % n_emplacements;
+                    gene = rand() % n_emplacements;// Change la position
                 }
-                fichier << "Mutation: " << old_gene << " -> " << gene << "\n";
+                fichier << "Mutation: " << old_gene << " -> " << gene << "\n"; // Loggue la mutation
                 total_mutations++;
                 individu_mute = true;
             }
+
         }
-        
+                // Loggue l'individu après mutation si nécessaire
         if (individu_mute) {
             fichier << "Individu " << idx+1 << " après mutation: [ ";
             for (int g : population[idx]) fichier << g << " ";
@@ -529,7 +527,7 @@ void mutation(Population& population, double mutation_rate, int n_emplacements) 
             fichier << "Aucune mutation pour cet individu\n";
         }
     }
-    
+        // Loggue le nombre total de mutations
     fichier << "\nTotal mutations appliquées: " << total_mutations << "\n";
     fichier << "=== FIN MUTATION ===\n\n";
     fichier.close();
@@ -544,24 +542,23 @@ void remplacement(Population& population, const Population& enfants, int elite_c
     fichier << "Nombre d'enfants: " << enfants.size() << "\n";
     fichier << "Nombre d'élites à conserver: " << elite_count << "\n";
     
-    // Trier la population actuelle
+       // Trie la population actuelle par fitness décroissante
     sort(population.begin(), population.end(), [](const Chromosome& a, const Chromosome& b) {
         return fonctionFitness(a) > fonctionFitness(b);
     });
-    
+        // Loggue les meilleurs individus actuels
     fichier << "\nMeilleurs individus actuels:\n";
     for (int i = 0; i < min(3, (int)population.size()); ++i) {
         fichier << i+1 << ". [ ";
         for (int g : population[i]) fichier << g << " ";
         fichier << "] Fitness: " << fonctionFitness(population[i]) << "\n";
     }
-    
-    // Trier les enfants
+        // Trie les enfants par fitness décroissante
     Population enfants_tries = enfants;
     sort(enfants_tries.begin(), enfants_tries.end(), [](const Chromosome& a, const Chromosome& b) {
         return fonctionFitness(a) > fonctionFitness(b);
     });
-    
+        // Loggue les meilleurs enfants
     fichier << "\nMeilleurs enfants:\n";
     for (int i = 0; i < min(3, (int)enfants_tries.size()); ++i) {
         fichier << i+1 << ". [ ";
@@ -569,16 +566,15 @@ void remplacement(Population& population, const Population& enfants, int elite_c
         fichier << "] Fitness: " << fonctionFitness(enfants_tries[i]) << "\n";
     }
     
-    // Nouvelle population
+        // Initialise la nouvelle population
     Population nouvelle_population;
     
-    // Élitisme
+       // Élitisme: conserve les 'elite_count' meilleurs individus
     for (int i = 0; i < elite_count && i < population.size(); ++i) {
         nouvelle_population.push_back(population[i]);
     }
     fichier << "\nÉlites conservées: " << nouvelle_population.size() << "\n";
-    
-    // Ajout des meilleurs enfants
+        // Ajoute les meilleurs enfants jusqu'à remplir la population
     int index_enfant = 0;
     while (nouvelle_population.size() < population.size() &&
        static_cast<size_t>(index_enfant) < enfants_tries.size())
@@ -587,7 +583,7 @@ void remplacement(Population& population, const Population& enfants, int elite_c
         index_enfant++;
     }
     fichier << "Enfants ajoutés: " << index_enfant << "\n";
-    
+        // Si nécessaire, complète avec de nouveaux individus aléatoires
     // Complément avec nouveaux individus si nécessaire
     if (nouvelle_population.size() < population.size()) {
         int manquants = population.size() - nouvelle_population.size();
@@ -606,9 +602,9 @@ void remplacement(Population& population, const Population& enfants, int elite_c
             fichier << "] Fitness: " << fonctionFitness(nouveau) << "\n";
         }
     }
-    
+        // Remplace l'ancienne population par la nouvelle
     population = nouvelle_population;
-    
+        // Calcule et loggue les statistiques de fitness
     fichier << "\nNouvelle population:\n";
     double avg_fitness = 0;
     double max_fitness = 0;
@@ -625,196 +621,189 @@ void remplacement(Population& population, const Population& enfants, int elite_c
     fichier.close();
 }
 
+// Fonction pour réinitialiser les variables globales entre chaque instance
+void reinitialiserVariables() {
+    capteurs.clear();
+    points_interet.clear();
+    emplacements.clear();
+    matrice_distance.clear();
+    meilleure_solution.clear();
+    meilleure_fitness = 0.0;
+    TAILLE_POPULATION = 0;
+    N_GENERATIONS = 0;
+    MUTATION_RATE = 0.0;
+    CROSSOVER_RATE = 0.0;
+    TOURNAMENT_SIZE = 0;
+    N_CAPTEURS = 0;
+    N_EMPLACEMENTS = 0;
+    chromosome_size = 0;
+}
+
 // Initialisation fichier CSV (sans écraser si déjà existant)
 void initialiserFichierResultats(const string& nomFichier) {
     ifstream f_existant(nomFichier);
     if (!f_existant.good() || f_existant.peek() == ifstream::traits_type::eof()) {
         // Si le fichier n'existe pas ou est vide, on écrit l'entête
         ofstream f(nomFichier);
-        f << "Fichier,POI,Capteurs,Faisable,Capteurs_utilisés,POI_Couverts,duration,Generations\n";
+        f << "Instance,Meilleure_solution,POI_couverts,Nb_POI,Capteurs_utilises,Temps_ms\n";
         f.close();
     }
 }
 
 int main() {
-    // Vider le fichier log
-    ofstream fichier("log.txt");
-    fichier.close();
-    auto start_time = chrono::high_resolution_clock::now();
-
-    // Charger les données
-    initialiserFichierResultats("resultats.csv"); 
-    lireJSON("config1.json");
-    calculerMatriceDistance();
-    calculerEtAfficherMatriceCouvertureParCapteur();
-
-    // Initialisation population
-    Population population = initialiser_population();
-    afficher_population(population);
-
-    int generation = 0;
-    int stagnation_count = 0;
-    const int MAX_GENERATIONS = 10;  // Augmenté
-    const int MAX_STAGNATION = 10;    // Augmenté
-
-    double meilleure_fitness_precedente = -1.0;
-    Chromosome meilleure_solution_globale;
-    double meilleure_fitness_globale = -1.0;
-
-    // === BOUCLE PRINCIPALE ===
-    while (generation <  MAX_GENERATIONS && stagnation_count <  MAX_STAGNATION) {
-        log("\n--- Génération " + to_string(generation + 1) + " ---");
-
-         // Étape 1 : Évaluation
-    int solutions_valides = 0; // Compte les individus qui couvrent tous les points
-    vector<double> fitness_values; // Stocke les valeurs de fitness de chaque individu
-    for (const auto& individu : population) {    // Parcours de chaque individu de la population actuelle
-        double fitness = fonctionFitness(individu); // Calcul de la fitness pour l'individu courant
-        fitness_values.push_back(fitness);// Enregistrement de cette fitness dans le tableau des valeurs
-        if (fitness > 0) solutions_valides++; // Si la fitness > 0, alors l'individu couvre tous les points (c'est une solution valide)
-        
-        // Mise à jour meilleure solution globale...
+    // Initialiser le fichier CSV
+    initialiserFichierResultats("resultats.csv");
+    // TEST: écriture forcée d'une ligne dans le CSV pour diagnostic
+    {
+        ofstream test_csv("resultats.csv", ios::app);
+        if (test_csv.is_open()) {//Vérifie si le fichier est accessible
+            //test_csv << "TEST,1,2,Oui,3,4,5,6\n";
+            test_csv.close();//Ferme le fichier (écriture vide, juste pour tester)
+            cout << "[DEBUG] Ligne de test écrite dans resultats.csv" << endl;
+        } else {//Affiche une erreur si l'ouverture échoue
+            cerr << "[ERREUR] Impossible d'ouvrir resultats.csv pour écriture de test." << endl;
+        }
     }
-    
-    // Affichage du nombre de solutions valides  // Affichage console (et éventuellement log) du nombre de solutions valides pour cette génération
-    cout << "Génération " << generation + 1 
-         << " - Solutions valides: " << solutions_valides 
-         << "/" << population.size() << endl;
-        // Étape 1 : Évaluation
-      //  vector<double> fitness_values;
-        for (const auto& individu : population) {// Ici, on cherche le meilleur individu global (parmi toutes les générations passées)
-            double fitness = fonctionFitness(individu);
-            fitness_values.push_back(fitness);
-            
-            // Mise à jour meilleure solution globale// et que l'individu couvre tous les points (vérification de validité)
-        // Si on trouve une fitness supérieure à celle enregistrée jusque-là,
-            if (fitness > meilleure_fitness_globale && estCouvertureComplete(individu)) {
-                meilleure_fitness_globale = fitness;  // On met à jour la meilleure fitness connue globalement
-                meilleure_solution_globale = individu;  // On sauvegarde l'individu correspondant comme meilleure solution
-                //eliminerCapteursInutiles(meilleure_solution_globale); // Optimisation immédiate // On élimine les capteurs inutiles pour simplifier la solution
+    // Lire le fichier JSON  Ouvre le fichier JSON "data1.json" en lecture
+    ifstream input("data1.json");
+    if (!input.is_open()) {//Ouvre le fichier JSON "data1.json" en lecture
+        cerr << "Erreur: Impossible d'ouvrir le fichier data1.json" << endl;//affiche une erreur et quitte le programme avec un code 1 (échec)
+        return 1;
+    }
+    json j;//Crée un objet JSON pour stocker les données parsées
+    try {
+        input >> j;//Parse le contenu du fichier JSON dans l'objet `j`
+        cout << "[DEBUG] Lecture JSON OK" << endl;//Confirme la réussite de la lecture
+    } catch (const exception& e) {
+        cerr << "Erreur lors de la lecture du fichier JSON: " << e.what() << endl;//Capture les erreurs de parsing et affiche le message
+        return 1;
+    }//Vérifie si la clé "genetic_params" existe dans le JSON
+    // Récupérer les paramètres génétiques
+    if (!j.contains("genetic_params")) {
+        cerr << "Erreur: Pas de clé genetic_params dans le JSON." << endl;//Affiche une erreur si la clé est manquante
+        return 1;
+    }//Récupère les paramètres génétiques depuis l'objet JSON
+    json genetic_params = j["genetic_params"];
+    // Parcourir toutes les clés .bmp
+    int instance = 0;
+    for (auto it = j.begin(); it != j.end(); ++it) {
+        std::string key = it.key();
+        if (key.size() > 4 && key.substr(key.size()-4) == ".bmp") {
+            cout << "\n=== Traitement de l'image " << key << " ===" << endl;
+            reinitialiserVariables();//Réinitialise les variables globales pour une nouvelle instance
+            auto start_time = chrono::high_resolution_clock::now();//Démarre un chronomètre pour mesurer le temps d'exécution
+            try {
+                lireInstanceDepuisObjet(it.value(), genetic_params);//Charge les données de l'instance (capteurs, POI, etc.)
+                calculerMatriceDistance();
+                calculerEtAfficherMatriceCouvertureParCapteur();
+                Population population = initialiser_population();
+                afficher_population(population);
+               // Initialise les variables de contrôle de la convergence
+                int generation = 0;
+                int stagnation_count = 0;
+                const int MAX_GENERATIONS = N_GENERATIONS;
+                const int MAX_STAGNATION = 10;
+                double meilleure_fitness_precedente = -1.0;
+                Chromosome meilleure_solution_globale;
+                double meilleure_fitness_globale = -1.0;
+                while (generation < MAX_GENERATIONS && stagnation_count < MAX_STAGNATION) {//Boucle principale de l'algorithme génétique
+                    log("\n--- Génération " + to_string(generation + 1) + " ---");
+                    int solutions_valides = 0;
+                    vector<double> fitness_values;
+                    for (const auto& individu : population) {
+                        //Calcule la fitness de l'individu
+                        double fitness = fonctionFitness(individu);
+                        fitness_values.push_back(fitness);
+                       // Compte les solutions valides (fitness > 0)
+                        if (fitness > 0) solutions_valides++;
+                        if (fitness > meilleure_fitness_globale && estCouvertureComplete(individu)) {//Met à jour la meilleure solution globale
+                            meilleure_fitness_globale = fitness;
+                            meilleure_solution_globale = individu;
+                        }
+                    }//Affiche l'avancement en console
+                    cout << "Génération " << generation + 1 
+                         << " - Solutions valides: " << solutions_valides 
+                         << "/" << population.size() << endl;
+                    Population selected_population = selectionParTournoiAvecLog(population, TOURNAMENT_SIZE);
+                    Population crossed_population = crossover(selected_population, CROSSOVER_RATE, chromosome_size);
+                    mutation(crossed_population, MUTATION_RATE, N_EMPLACEMENTS);
+                    for (auto& individu : crossed_population) {
+                        if (!estCouvertureComplete(individu)) {
+                            //reparer(individu);
+                        }
+                    }
+                    remplacement(population, crossed_population, 2);
+                    //Vérifie la stagnation (pas d'amélioration)
+                    double max_fitness = *max_element(fitness_values.begin(), fitness_values.end());
+                    if (max_fitness <= meilleure_fitness_precedente) {
+                        stagnation_count++;
+                        log("Stagnation #" + to_string(stagnation_count));
+                    } else {
+                        stagnation_count = 0;
+                        meilleure_fitness_precedente = max_fitness;
+                    }
+                    generation++;//Passe à la génération suivante
+                }//Arrête le chronomètre et calcule la durée
+                auto end_time = chrono::high_resolution_clock::now();
+                auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time).count();
+                //Ouvre le fichier CSV en mode append
+                ofstream result_csv("resultats.csv", ios::app);
+                if (result_csv.is_open()) {
+                    int nb_POI = points_interet.size();
+                    int capteurs_utilises = 0;
+                    int poi_couverts = 0;
+                    string meilleure_config = "";
+                    if (!meilleure_solution_globale.empty()) {//Si une solution valide a été trouvée Si une solution valide a été trouvée
+                        capteurs_utilises = count_if(meilleure_solution_globale.begin(), meilleure_solution_globale.end(), [](int x) { return x != -1; });
+                        poi_couverts = CountCoveredPOI(meilleure_solution_globale);//Compte les POI couverts
+                        // Encoder la configuration sous forme de string
+                        for (size_t i = 0; i < meilleure_solution_globale.size(); ++i) {//ormate la configuration pour le CSV
+                            if (i > 0) meilleure_config += ";";
+                            meilleure_config += to_string(meilleure_solution_globale[i]);
+                        }
+                    } else {
+                        meilleure_config = "Aucune";
+                    }//Écrit une ligne dans le CSV
+                    result_csv << "[" << key << "],"
+                              << "[" << meilleure_config << "],"
+                              << "[" << poi_couverts << "],"
+                              << "[" << nb_POI << "],"
+                              << "[" << capteurs_utilises << "],"
+                              << "[" << duration << "]\n";
+                    result_csv.close();
+                    // Affichage diagnostic Affiche des infos de débogage en console
+                    cout << "[DIAG] Image: " << key << endl;
+                    cout << "[DIAG] Nombre de points d'intérêt: " << nb_POI << endl;
+                    cout << "[DIAG] Nombre de points couverts par la meilleure solution: " << poi_couverts << endl;
+                    double rayon_max = 0.0;
+                    for (const auto& c : capteurs) rayon_max = max(rayon_max, c.rayon);
+                    cout << "[DIAG] Rayon maximal des capteurs: " << rayon_max << endl;
+                    cout << "[DIAG] Configuration meilleure solution: ";
+                    if (!meilleure_solution_globale.empty()) {
+                        for (int v : meilleure_solution_globale) cout << v << " ";
+                        cout << endl;
+                    } else {
+                        cout << "Aucune solution" << endl;
+                    }
+                }
+            } catch (const exception& e) {// Capture les erreurs pendant le traitement d'une instance
+                cerr << "[ERREUR] Exception dans le traitement de l'image " << key << ": " << e.what() << endl;
+                ofstream result_csv("resultats.csv", ios::app);
+                if (result_csv.is_open()) {
+                    result_csv << "[" << key << "],"
+                              << "[0],"
+                              << "[0],"
+                              << "[0],"
+                              << "[0],"
+                              << "[0]"
+                              << "\n";
+                    result_csv.close();
+                }
+                continue;//Passe à l'instance suivante
             }
+            instance++;//Incrémente le compteur d'instances
         }
-
-        // Étape 2 : Sélection 
-        Population selected_population = selectionParTournoiAvecLog(population, TOURNAMENT_SIZE);
-      
-        // Étape 3 : Croisement
-        Population crossed_population = crossover(selected_population, CROSSOVER_RATE, chromosome_size);
-
-        // Étape 4 : Mutation
-        mutation(crossed_population, MUTATION_RATE, N_EMPLACEMENTS);
-
-        // Étape 5 : Réparation des solutions invalides
-        for (auto& individu : crossed_population) {
-            if (!estCouvertureComplete(individu)) {
-                //reparer(individu);
-            }
-        }
-
-        // Étape 6 : Remplacement avec élitisme
-        remplacement(population, crossed_population, 2); // On garde les 2 meilleurs
-
-        // Détection de stagnation
-        double max_fitness = *max_element(fitness_values.begin(), fitness_values.end());
-        if (max_fitness <= meilleure_fitness_precedente) {
-            stagnation_count++;
-            log("Stagnation #" + to_string(stagnation_count));
-        } else {
-            stagnation_count = 0;
-            meilleure_fitness_precedente = max_fitness;
-        }
-        generation++;//Cela prépare la boucle à traiter la génération suivante.
-    }
-
-    
-    // === FIN ALGORITHME ===
-log("\n=== RESULTAT FINAL ===");
-log("Nombre total de générations: " + to_string(generation));
-log("Dernier compteur de stagnation: " + to_string(stagnation_count));
- 
-auto end_time = chrono::high_resolution_clock::now();
-auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time).count();
-
-// Sauvegarde de la meilleure solution trouvée
-ofstream final_solution("meilleure_solution_finale.txt");
-if (final_solution.is_open()) {
-    if (meilleure_fitness_globale <= 0) {
-        final_solution << "Aucune solution valide n'a été trouvée après " 
-                      << generation << " générations.\n";
-
-        cout << "\n=== AUCUNE SOLUTION VALIDE TROUVÉE ===" << endl;
-        cout << "L'algorithme n'a pas trouvé de configuration de capteurs" << endl;
-        cout << "couvrant tous les points d'intérêt après " 
-             << generation << " générations." << endl;
-    } else {
-        int nb_capteurs = count_if(meilleure_solution_globale.begin(),
-                                   meilleure_solution_globale.end(),
-                                   [](int x) { return x != -1; });
-
-        int nb_points_couverts = CountCoveredPOI(meilleure_solution_globale);
-
-        final_solution << "Meilleure solution globale (fitness = " 
-                      << meilleure_fitness_globale << "):\n";
-        final_solution << "Nombre de capteurs utilisés: " 
-                      << nb_capteurs << "\n";
-        final_solution << "Nombre de points d’intérêt couverts: " 
-                      << nb_points_couverts << "\n";
-
-        final_solution << "Configuration: ";
-        for (int gene : meilleure_solution_globale) {
-            final_solution << gene << " ";
-        }
-        final_solution << "\n";
-
-        // Affichage console
-        cout << "\n=== SOLUTION OPTIMALE TROUVÉE ===" << endl;
-        cout << "Capteurs utilisés: " << nb_capteurs << endl;
-        cout << "Points d’intérêt couverts: " << nb_points_couverts << endl;
-
-        for (size_t i = 0; i < meilleure_solution_globale.size(); ++i) {
-            if (meilleure_solution_globale[i] != -1) {
-                cout << "Capteur " << i << " -> Position " 
-                     << meilleure_solution_globale[i] << endl;
-            }
-        }
-        cout << "Fitness: " << meilleure_fitness_globale << endl;
-    }
-    final_solution.close();
-}
-
-    // Affichage console
-    cout << "\n=== SOLUTION OPTIMALE TROUVEE ===" << endl;
-    cout << "Capteurs utilises: ";
-    for (size_t i = 0; i < meilleure_solution_globale.size(); ++i) {
-        if (meilleure_solution_globale[i] != -1) {
-            cout << "Capteur " << i << " -> Position " 
-                 << meilleure_solution_globale[i] << endl;
-        }
-    }
-    cout << "Fitness: " << meilleure_fitness_globale << endl;
-    ofstream result_csv("resultats.csv", ios::app); // 'append' pour ne pas écraser les précédents
-
-if (result_csv.is_open()) {
-    string nom_fichier = "config1.json";  // Tu peux le rendre dynamique si besoin
-    int nb_POI = points_interet.size();
-    int nb_capteurs = capteurs.size();
-    int capteurs_utilises = count_if(meilleure_solution_globale.begin(), meilleure_solution_globale.end(),
-                                     [](int x) { return x != -1; });
-    int poi_couverts = CountCoveredPOI(meilleure_solution_globale);
-    string faisable = (estCouvertureComplete(meilleure_solution_globale)) ? "Oui" : "Non";
-
-    result_csv << nom_fichier << "," 
-               << nb_POI << ","
-               << nb_capteurs << ","
-               << faisable << ","
-               << capteurs_utilises << ","
-               << poi_couverts << ","
-               << duration << ","
-               << generation << "\n";
-
-    result_csv.close();
-}
-
-
+    }//Retourne 0 (succès) à la fin du programme.
     return 0;
 }
+
